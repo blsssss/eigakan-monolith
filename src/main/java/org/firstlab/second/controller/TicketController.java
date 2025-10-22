@@ -1,6 +1,7 @@
 package org.firstlab.second.controller;
 
 import jakarta.validation.Valid;
+import org.firstlab.second.dto.BulkPurchaseRequest;
 import org.firstlab.second.dto.TicketDTO;
 import org.firstlab.second.service.TicketService;
 import org.springframework.http.HttpStatus;
@@ -71,5 +72,11 @@ public class TicketController {
     public ResponseEntity<List<TicketDTO>> getActiveTicketsByScreening(@PathVariable Long screeningId) {
         List<TicketDTO> tickets = ticketService.getActiveTicketsByScreening(screeningId);
         return ResponseEntity.ok(tickets);
+    }
+
+    @PostMapping("/bulk-purchase")
+    public ResponseEntity<List<TicketDTO>> bulkPurchaseTickets(@Valid @RequestBody BulkPurchaseRequest request) {
+        List<TicketDTO> tickets = ticketService.bulkPurchaseTickets(request);
+        return new ResponseEntity<>(tickets, HttpStatus.CREATED);
     }
 }

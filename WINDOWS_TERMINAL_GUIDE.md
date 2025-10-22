@@ -230,3 +230,80 @@ Invoke-RestMethod -Uri "http://localhost:8081/api/tickets/customer/1" -Method Ge
 Invoke-RestMethod -Uri "http://localhost:8081/api/tickets/screening/1/active" -Method Get
 ```
 
+### 🎟️ Массовая покупка билетов (Бизнес-операция)
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8081/api/tickets/bulk-purchase" -Method Post -Body '{"screeningId":1,"customerId":1,"seatNumbers":[10,11,12,13]}' -ContentType "application/json; charset=utf-8"
+```
+
+**Или с curl:**
+```powershell
+curl -X POST "http://localhost:8081/api/tickets/bulk-purchase" -H "Content-Type: application/json" -d "{\"screeningId\":1,\"customerId\":1,\"seatNumbers\":[10,11,12,13]}"
+```
+
+---
+
+
+
+## ❌ ПРОВЕРКА ОШИБОК
+
+### Попытка купить занятое место
+```powershell
+try {
+    Invoke-RestMethod -Uri "http://localhost:8081/api/tickets" -Method Post -Body '{"screeningId":1,"customerId":1,"seatNumber":15}' -ContentType "application/json; charset=utf-8"
+} catch {
+    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+    $reader.BaseStream.Position = 0
+    $responseBody = $reader.ReadToEnd()
+    Write-Host "Ошибка: $responseBody" -ForegroundColor Red
+}
+```
+
+### Попытка массовой покупки с занятыми местами
+```powershell
+try {
+    Invoke-RestMethod -Uri "http://localhost:8081/api/tickets/bulk-purchase" -Method Post -Body '{"screeningId":1,"customerId":1,"seatNumbers":[15,16,17]}' -ContentType "application/json; charset=utf-8"
+} catch {
+    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+    $reader.BaseStream.Position = 0
+    $responseBody = $reader.ReadToEnd()
+    Write-Host "Ошибка: $responseBody" -ForegroundColor Red
+}
+```
+
+### Попытка отменить билет после начала сеанса
+```powershell
+# Создать сеанс в прошлом
+$pastScreening = Invoke-RestMethod -Uri "http://localhost:8081/api/screenings" -Method Post -Body '{"movieId":1,"hallId":1,"startTime":"2023-10-15T19:00:00","price":500.0}' -ContentType "application/json; charset=utf-8"
+
+# Купить билет
+$ticket = Invoke-RestMethod -Uri "http://localhost:8081/api/tickets" -Method Post -Body "{\"screeningId\":$($pastScreening.id),\"customerId\":1,\"seatNumber\":10}" -ContentType "application/json; charset=utf-8"
+
+# Попытка отменить
+try {
+    Invoke-RestMethod -Uri "http://localhost:8081/api/tickets/$($ticket.id)/cancel" -Method Post
+} catch {
+    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+    $reader.BaseStream.Position = 0
+    $responseBody = $reader.ReadToEnd()
+    Write-Host "Ошибка: $responseBody" -ForegroundColor Red
+}
+```
+
+### Проверка валидации данных
+```powershell
+try {
+    Invoke-RestMethod -Uri "http://localhost:8081/api/customers" -Method Post -Body '{"firstName":"","lastName":"","email":"invalid-email","phone":""}' -ContentType "application/json; charset=utf-8"
+} catch {
+    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+    $reader.BaseStream.Position = 0
+    $responseBody = $reader.ReadToEnd()
+    
+    $result = $responseBody | ConvertFrom-Json
+    
+    Write-Host "`nОшибки валидации:" -ForegroundColor Yellow
+    $result.errors.PSObject.Properties | ForEach-Object {
+        Write-Host "  - $($_.Name): $($_.Value)" -ForegroundColor Yellow
+    }
+}
+```
+

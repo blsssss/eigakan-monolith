@@ -1,5 +1,6 @@
 package org.firstlab.second.service;
 
+import org.firstlab.second.dto.BulkPurchaseRequest;
 import org.firstlab.second.dto.TicketDTO;
 import org.firstlab.second.entity.Customer;
 import org.firstlab.second.entity.Screening;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -160,6 +162,87 @@ public class TicketService {
 
     public List<TicketDTO> getActiveTicketsByScreening(Long screeningId) {
         return ticketRepository.findByScreeningIdAndIsCancelled(screeningId, false).stream()
+                .map(t -> convertToDTO(t, true))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Business Operation: Bulk Purchase - Buy multiple tickets at once
+     * This is a transactional operation that ensures all tickets are purchased together or none at all
+     */
+    public List<TicketDTO> bulkPurchaseTickets(BulkPurchaseRequest request) {
+        // Validate screening exists
+        Screening screening = screeningRepository.findById(request.getScreeningId())
+                .orElseThrow(() -> new RuntimeException("Screening with ID " + request.getScreeningId() + " not found"));
+
+        // Validate customer exists
+        Customer customer = customerRepository.findById(request.getCustomerId())
+                .orElseThrow(() -> new RuntimeException("Customer with ID " + request.getCustomerId() + " not found"));
+
+        // Check if there are enough seats available
+        Long activeTickets = ticketRepository.countActiveTicketsByScreeningId(screening.getId());
+        int requestedSeats = request.getSeatNumbers().size();
+        long availableSeats = screening.getHall().getCapacity() - activeTickets;
+
+        if (requestedSeats > availableSeats) {
+            throw new RuntimeException("Not enough seats available. Requested: " + requestedSeats +
+                    ", Available: " + availableSeats);
+        }
+
+        // Get all currently taken seats for this screening
+        List<Ticket> existingTickets = ticketRepository.findByScreeningIdAndIsCancelled(screening.getId(), false);
+        List<Integer> takenSeats = existingTickets.stream()
+                .map(Ticket::getSeatNumber)
+                .collect(Collectors.toList());
+
+        // Check if any requested seat is already taken
+        List<Integer> conflictingSeats = request.getSeatNumbers().stream()
+                .filter(takenSeats::contains)
+                .collect(Collectors.toList());
+
+        if (!conflictingSeats.isEmpty()) {
+            throw new RuntimeException("The following seats are already taken: " + conflictingSeats);
+        }
+
+        // Check if any seat number exceeds hall capacity
+        Integer maxRequestedSeat = request.getSeatNumbers().stream()
+                .max(Integer::compareTo)
+                .orElse(0);
+
+        if (maxRequestedSeat > screening.getHall().getCapacity()) {
+            throw new RuntimeException("Seat number " + maxRequestedSeat +
+                    " exceeds hall capacity of " + screening.getHall().getCapacity());
+        }
+
+        // Check for duplicate seat numbers in request
+        long uniqueSeats = request.getSeatNumbers().stream().distinct().count();
+        if (uniqueSeats != request.getSeatNumbers().size()) {
+            throw new RuntimeException("Duplicate seat numbers in request are not allowed");
+        }
+
+        // All checks passed - create all tickets in one transaction
+        List<Ticket> tickets = new ArrayList<>();
+        LocalDateTime purchaseTime = LocalDateTime.now();
+
+        for (Integer seatNumber : request.getSeatNumbers()) {
+            Ticket ticket = new Ticket();
+            ticket.setScreening(screening);
+            ticket.setCustomer(customer);
+            ticket.setSeatNumber(seatNumber);
+            ticket.setPurchaseTime(purchaseTime);
+            ticket.setIsCancelled(false);
+            tickets.add(ticket);
+        }
+
+        // Save all tickets
+        List<Ticket> savedTickets = ticketRepository.saveAll(tickets);
+
+        // Update available seats
+        screening.setAvailableSeats(screening.getAvailableSeats() - requestedSeats);
+        screeningRepository.save(screening);
+
+        // Convert to DTOs and return
+        return savedTickets.stream()
                 .map(t -> convertToDTO(t, true))
                 .collect(Collectors.toList());
     }
