@@ -154,13 +154,6 @@ REST API для управления кинотеатром с функциям�
 5. Owner: `postgres`
 6. Нажмите "Save"
 
-### Настройки подключения (application.properties):
-```properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/cinemadb
-spring.datasource.username=postgres
-spring.datasource.password=postgres
-spring.jpa.hibernate.ddl-auto=update
-```
 
 ## Запуск приложения
 
