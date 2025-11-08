@@ -7,15 +7,32 @@
 http://localhost:8081
 ```
 
-## 🔐 Аутентификация и CSRF (ВАЖНО)
+## 🔐 Аутентификация и CSRF 
 В проект подключена Spring Security с Basic Auth и включённой защитой CSRF. Это значит:
 - Для всех запросов требуется аутентификация (кроме `/api/auth/**`).
 - Для методов POST/PUT/DELETE дополнительно требуется CSRF-токен (в заголовке) и cookie `XSRF-TOKEN`.
 - CSRF-токен можно получить через эндпоинт `GET /api/auth/csrf` (он же установит cookie).
 
-По умолчанию создаются тестовые пользователи (логины/пароли):
-- Администратор: `admin` / `Admin@123`
-- Пользователь: `user` / `User@1234`
+Учётные данные пользователей задаются через переменные окружения:
+- `APP_ADMIN_USERNAME`, `APP_ADMIN_PASSWORD`
+- `APP_USER_USERNAME`, `APP_USER_PASSWORD`
+Если переменные не заданы, сидинг пользователей при старте приложения не выполняется. Вставляйте свои логин/пароль в примеры ниже.
+
+Быстрое использование своих логина/пароля в PowerShell:
+```powershell
+# Задайте значения в системных переменных окружения или в .env (если IDE их подхватывает)
+$adminUser = $env:APP_ADMIN_USERNAME
+$adminPass = $env:APP_ADMIN_PASSWORD
+$userUser  = $env:APP_USER_USERNAME
+$userPass  = $env:APP_USER_PASSWORD
+
+# BasicAuth из переменных окружения (пример для админа)
+$basicAdmin = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$adminUser:$adminPass"))
+# BasicAuth для пользователя
+$basicUser  = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$userUser:$userPass"))
+```
+
+> В примерах ниже там, где ранее были захардкоженные креды `admin:Admin@123`/`user:User@1234`, используйте свои `$basicAdmin`/`$basicUser`.
 
 ### Быстрый старт (PowerShell): сессия, токен и функции
 ```powershell
@@ -27,9 +44,8 @@ $csrfResp = Invoke-RestMethod -Uri "http://localhost:8081/api/auth/csrf" -Method
 $CSRF_HEADER = $csrfResp.headerName   # Обычно: X-XSRF-TOKEN
 $CSRF_TOKEN  = $csrfResp.token
 
-# 3) Готовим заголовки. Для BasicAuth укажем логин:пароль
-$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("user:User@1234"))  # Замените на свои
-$SECURE_HEADERS = @{ "Authorization" = "Basic $basic"; $($CSRF_HEADER) = $CSRF_TOKEN; "Content-Type" = "application/json; charset=utf-8" }
+# 3) Готовим заголовки. Для BasicAuth используем ваши переменные окружения
+$SECURE_HEADERS = @{ "Authorization" = "Basic $basicUser"; $($CSRF_HEADER) = $CSRF_TOKEN; "Content-Type" = "application/json; charset=utf-8" }
 
 # 4) Удобные функции
 function GET-AUTH { param($url) Invoke-RestMethod -Uri $url -Method Get -Headers $SECURE_HEADERS -WebSession $sess }
@@ -48,7 +64,7 @@ $header = (Get-Content csrf.json | ConvertFrom-Json).headerName
 # 2) Делаем авторизованные запросы (пример POST)
 # -u логин:пароль добавит BasicAuth, -b cookies.txt отправит cookie XSRF-TOKEN,
 # -H "$header: $token" добавит заголовок с токеном
-curl -X POST "http://localhost:8081/api/movies" -H "Content-Type: application/json; charset=utf-8" -H "$header: $token" -b cookies.txt -u admin:Admin@123 -d '{"title":"Интерстеллар","description":"Космос","durationMinutes":169,"genre":"Фантастика","director":"Кристофер Нолан","year":2014}'
+curl -X POST "http://localhost:8081/api/movies" -H "Content-Type: application/json; charset=utf-8" -H "$header: $token" -b cookies.txt -u "$env:APP_ADMIN_USERNAME:$env:APP_ADMIN_PASSWORD" -d '{"title":"Интерстеллар","description":"Космос","durationMinutes":169,"genre":"Фантастика","director":"Кристофер Нолан","year":2014}'
 ```
 
 ### Регистрация пользователя
@@ -400,14 +416,14 @@ curl -i http://localhost:8081/api/movies    # HTTP/1.1 401 Unauthorized
 
 PowerShell:
 ```powershell
-$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:Admin@123"))
-Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Post -Body '{"title":"X"}' -ContentType "application/json" -Headers @{ "Authorization" = "Basic $basic" }
+# Используем заранее подготовленную переменную $basicAdmin из секции выше
+Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Post -Body '{"title":"X"}' -ContentType "application/json" -Headers @{ "Authorization" = "Basic $basicAdmin" }
 # => 403 Forbidden (нет CSRF)
 ```
 
 curl:
 ```bash
-curl -i -X POST http://localhost:8081/api/movies -u admin:Admin@123 -H "Content-Type: application/json" -d '{"title":"X"}'
+curl -i -X POST http://localhost:8081/api/movies -u "$env:APP_ADMIN_USERNAME:$env:APP_ADMIN_PASSWORD" -H "Content-Type: application/json" -d '{"title":"X"}'
 # => HTTP/1.1 403 Forbidden (нет CSRF)
 ```
 
@@ -433,7 +449,7 @@ TOKEN=$(jq -r .token csrf.json)
 HEADER=$(jq -r .headerName csrf.json)
 
 # 2) GET (без CSRF, но с авторизацией)
-curl -i http://localhost:8081/api/movies -u user:User@1234
+curl -i http://localhost:8081/api/movies -u "$env:APP_USER_USERNAME:$env:APP_USER_PASSWORD"
 
 # 3) POST (с CSRF + cookie + авторизацией)
 curl -i -X POST "http://localhost:8081/api/movies" \
