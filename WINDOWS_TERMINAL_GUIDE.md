@@ -7,13 +7,61 @@
 http://localhost:8081
 ```
 
+## 🔐 Аутентификация и CSRF (ВАЖНО)
+В проект подключена Spring Security с Basic Auth и включённой защитой CSRF. Это значит:
+- Для всех запросов требуется аутентификация (кроме `/api/auth/**`).
+- Для методов POST/PUT/DELETE дополнительно требуется CSRF-токен (в заголовке) и cookie `XSRF-TOKEN`.
+- CSRF-токен можно получить через эндпоинт `GET /api/auth/csrf` (он же установит cookie).
+
+По умолчанию создаются тестовые пользователи (логины/пароли):
+- Администратор: `admin` / `Admin@123`
+- Пользователь: `user` / `User@1234`
+
+### Быстрый старт (PowerShell): сессия, токен и функции
 ```powershell
-# Alias 
-function POST-API { param($url, $body) Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/json; charset=utf-8" }
-function GET-API { param($url) Invoke-RestMethod -Uri $url -Method Get }
-function PUT-API { param($url, $body) Invoke-RestMethod -Uri $url -Method Put -Body $body -ContentType "application/json; charset=utf-8" }
-function DELETE-API { param($url) Invoke-RestMethod -Uri $url -Method Delete }
+# 1) Создаём web-сессию для хранения cookie
+$sess = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+
+# 2) Получаем CSRF-токен (и cookie XSRF-TOKEN) — без аутентификации
+$csrfResp = Invoke-RestMethod -Uri "http://localhost:8081/api/auth/csrf" -Method Get -WebSession $sess
+$CSRF_HEADER = $csrfResp.headerName   # Обычно: X-XSRF-TOKEN
+$CSRF_TOKEN  = $csrfResp.token
+
+# 3) Готовим заголовки. Для BasicAuth укажем логин:пароль
+$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("user:User@1234"))  # Замените на свои
+$SECURE_HEADERS = @{ "Authorization" = "Basic $basic"; $($CSRF_HEADER) = $CSRF_TOKEN; "Content-Type" = "application/json; charset=utf-8" }
+
+# 4) Удобные функции
+function GET-AUTH { param($url) Invoke-RestMethod -Uri $url -Method Get -Headers $SECURE_HEADERS -WebSession $sess }
+function POST-SECURE { param($url, $body) Invoke-RestMethod -Uri $url -Method Post -Body $body -Headers $SECURE_HEADERS -WebSession $sess }
+function PUT-SECURE { param($url, $body) Invoke-RestMethod -Uri $url -Method Put -Body $body -Headers $SECURE_HEADERS -WebSession $sess }
+function DELETE-SECURE { param($url) Invoke-RestMethod -Uri $url -Method Delete -Headers $SECURE_HEADERS -WebSession $sess }
 ```
+
+### Быстрый старт (curl): cookies и CSRF
+```powershell
+# 1) Получаем токен и сохраняем cookie
+curl -c cookies.txt http://localhost:8081/api/auth/csrf > csrf.json
+$token = (Get-Content csrf.json | ConvertFrom-Json).token
+$header = (Get-Content csrf.json | ConvertFrom-Json).headerName
+
+# 2) Делаем авторизованные запросы (пример POST)
+# -u логин:пароль добавит BasicAuth, -b cookies.txt отправит cookie XSRF-TOKEN,
+# -H "$header: $token" добавит заголовок с токеном
+curl -X POST "http://localhost:8081/api/movies" -H "Content-Type: application/json; charset=utf-8" -H "$header: $token" -b cookies.txt -u admin:Admin@123 -d '{"title":"Интерстеллар","description":"Космос","durationMinutes":169,"genre":"Фантастика","director":"Кристофер Нолан","year":2014}'
+```
+
+### Регистрация пользователя
+```powershell
+# Регистрация (без авторизации, но с CSRF)
+# СГЕНЕРИРУЕМ УНИКАЛЬНОЕ ИМЯ, чтобы не получить 400 из‑за дубликата
+$u = "newuser$([Guid]::NewGuid().ToString('N').Substring(0,6))"
+$body = @{ username = $u; password = "Strong@123" } | ConvertTo-Json
+Invoke-RestMethod -Uri "http://localhost:8081/api/auth/register" -Method Post -Body $body -ContentType "application/json; charset=utf-8" -Headers @{ $CSRF_HEADER = $CSRF_TOKEN } -WebSession $sess
+```
+
+> После регистрации обновите переменную $basic, чтобы выполнять запросы от нового пользователя: `$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$u:Strong@123"))`.
+
 
 ---
 
@@ -307,3 +355,183 @@ try {
 }
 ```
 
+
+
+---
+
+## Примеры запросов: без авторизации и с авторизацией/CSRF
+
+Ниже — конкретные сценарии и ожидаемые ответы. Это поможет быстро понять, почему приходит 401/403/400 и как сделать правильный запрос.
+
+### 1) Без авторизации (ожидаемый 401 Unauthorized)
+- Любой запрос к защищённым ресурсам (например, `GET /api/movies`) без заголовка `Authorization` вернёт 401.
+
+PowerShell:
+```powershell
+# Windows PowerShell 5.1 — покажет исключение с кодом 401
+Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Get
+```
+
+Чтобы увидеть тело ответа при ошибке (PS 5.1):
+```powershell
+try {
+  Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Get
+} catch {
+  $resp = $_.Exception.Response
+  if ($resp -ne $null) {
+    $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+    $reader.ReadToEnd() | Write-Host
+  }
+}
+```
+
+PowerShell 7+ (Core):
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Get -SkipHttpErrorCheck
+```
+
+curl:
+```bash
+curl -i http://localhost:8081/api/movies    # HTTP/1.1 401 Unauthorized
+```
+
+### 2) С авторизацией, но без CSRF на POST/PUT/DELETE (ожидаемый 403 Forbidden)
+- Для методов изменения данных требуется CSRF. Если отправите только BasicAuth без CSRF — будет 403.
+
+PowerShell:
+```powershell
+$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:Admin@123"))
+Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Post -Body '{"title":"X"}' -ContentType "application/json" -Headers @{ "Authorization" = "Basic $basic" }
+# => 403 Forbidden (нет CSRF)
+```
+
+curl:
+```bash
+curl -i -X POST http://localhost:8081/api/movies -u admin:Admin@123 -H "Content-Type: application/json" -d '{"title":"X"}'
+# => HTTP/1.1 403 Forbidden (нет CSRF)
+```
+
+### 3) Полностью корректный запрос: BasicAuth + CSRF
+Используйте шаги из раздела «Быстрый старт»: получите CSRF и cookie, сформируйте `SECURE_HEADERS`, затем:
+
+PowerShell:
+```powershell
+# Предполагается, что вы уже выполнили шаги: $sess, $csrfResp, $CSRF_HEADER, $CSRF_TOKEN, $SECURE_HEADERS
+# Пример авторизованного чтения (GET) — CSRF для GET не обязателен
+GET-AUTH "http://localhost:8081/api/movies"
+
+# Пример создания (POST) — нужен CSRF
+$body = '{"title":"Интерстеллар","description":"Космос","durationMinutes":169,"genre":"Фантастика","director":"Кристофер Нолан","year":2014}'
+POST-SECURE "http://localhost:8081/api/movies" $body
+```
+
+curl (полный сценарий):
+```bash
+# 1) Получаем CSRF и cookie
+curl -c cookies.txt http://localhost:8081/api/auth/csrf > csrf.json
+TOKEN=$(jq -r .token csrf.json)
+HEADER=$(jq -r .headerName csrf.json)
+
+# 2) GET (без CSRF, но с авторизацией)
+curl -i http://localhost:8081/api/movies -u user:User@1234
+
+# 3) POST (с CSRF + cookie + авторизацией)
+curl -i -X POST "http://localhost:8081/api/movies" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -H "$HEADER: $TOKEN" \
+  -b cookies.txt \
+  -u admin:Admin@123 \
+  -d '{"title":"Интерстеллар","description":"Космос","durationMinutes":169,"genre":"Фантастика","director":"Кристофер Нолан","year":2014}'
+```
+
+### 4) Регистрация без авторизации (НО с CSRF)
+`POST /api/auth/register` открыт без аутентификации, но CSRF обязателен (cookie + заголовок). Также действуют правила:
+- username — уникальный (ошибка 400, если уже занят),
+- пароль — минимум 8 символов, хотя бы 1 спецсимвол и 1 цифра.
+
+PowerShell (уникальный логин):
+```powershell
+# Предполагается, что $sess, $CSRF_HEADER, $CSRF_TOKEN уже получены из /api/auth/csrf
+$u = "newuser$([Guid]::NewGuid().ToString('N').Substring(0,6))"
+$bodyObj = @{ username = $u; password = "Strong@123" }
+$body = ($bodyObj | ConvertTo-Json)
+Invoke-RestMethod -Uri "http://localhost:8081/api/auth/register" -Method Post -Body $body -ContentType "application/json; charset=utf-8" -Headers @{ $CSRF_HEADER = $CSRF_TOKEN } -WebSession $sess
+```
+
+curl:
+```bash
+curl -c cookies.txt http://localhost:8081/api/auth/csrf > csrf.json
+TOKEN=$(jq -r .token csrf.json)
+HEADER=$(jq -r .headerName csrf.json)
+curl -i -X POST http://localhost:8081/api/auth/register \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -H "$HEADER: $TOKEN" \
+  -b cookies.txt \
+  -d '{"username":"newuser123456","password":"Strong@123"}'
+```
+
+### 5) Диагностика 400 Bad Request при регистрации
+Если `Invoke-RestMethod` показывает только `(400) Bad Request`, то причина обычно одна из:
+- такой username уже существует (повторная регистрация),
+- пароль не соответствует политике (нет спецсимвола/цифры, длина < 8),
+- не передан CSRF-токен/нет cookie `XSRF-TOKEN`.
+
+Как увидеть текст ошибки в PowerShell 5.1:
+```powershell
+try {
+  Invoke-RestMethod -Uri "http://localhost:8081/api/auth/register" -Method Post -Body '{"username":"newuser","password":"Strong@123"}' -ContentType "application/json; charset=utf-8" -Headers @{ $CSRF_HEADER = $CSRF_TOKEN } -WebSession $sess
+} catch {
+  $resp = $_.Exception.Response
+  if ($resp -ne $null) {
+    $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
+    $reader.ReadToEnd() | Write-Host
+  }
+}
+```
+
+PowerShell 7+:
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8081/api/auth/register" -Method Post -Body '{"username":"newuser","password":"Strong@123"}' -ContentType "application/json; charset=utf-8" -Headers @{ $CSRF_HEADER = $CSRF_TOKEN } -WebSession $sess -SkipHttpErrorCheck
+```
+
+curl (всегда печатает тело, удобно для отладки):
+```bash
+curl -i -X POST http://localhost:8081/api/auth/register \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -H "$HEADER: $TOKEN" \
+  -b cookies.txt \
+  -d '{"username":"newuser","password":"Strong@123"}'
+```
+
+Ожидаемое тело ошибки (пример):
+```json
+{
+  "timestamp": "2025-11-08T13:40:00",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Username is already taken",
+  "path": "/api/auth/register"
+}
+```
+
+### 6) Проверка текущего пользователя
+- Без авторизации: `GET /api/auth/me` вернёт `{ "authenticated": false }`.
+- С BasicAuth: вернёт имя и роли.
+
+PowerShell:
+```powershell
+# Без авторизации
+Invoke-RestMethod -Uri "http://localhost:8081/api/auth/me" -Method Get
+
+# С BasicAuth
+$basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("user:User@1234"))
+Invoke-RestMethod -Uri "http://localhost:8081/api/auth/me" -Method Get -Headers @{ "Authorization" = "Basic $basic" }
+```
+
+curl:
+```bash
+curl -i http://localhost:8081/api/auth/me
+curl -i http://localhost:8081/api/auth/me -u user:User@1234
+```
+
+> Примечание: имя заголовка для CSRF, возвращаемое `/api/auth/csrf`, обычно `X-XSRF-TOKEN`. Используйте именно то имя, которое вернул сервер (`headerName`).
