@@ -1,7 +1,11 @@
 package org.firstlab.second.controller;
 
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import org.firstlab.second.dto.LoginRequest;
+import org.firstlab.second.dto.RefreshTokenRequest;
 import org.firstlab.second.dto.RegisterRequest;
+import org.firstlab.second.dto.TokenResponse;
 import org.firstlab.second.service.AuthService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,6 +44,39 @@ public class AuthController {
         return new ResponseEntity<>(result, HttpStatus.CREATED);
     }
 
+    @PostMapping("/login")
+    public ResponseEntity<TokenResponse> login(
+            @Valid @RequestBody LoginRequest request,
+            HttpServletRequest httpRequest) {
+        String ipAddress = getClientIp(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
+
+        TokenResponse tokenResponse = authService.login(request, ipAddress, userAgent);
+        return ResponseEntity.ok(tokenResponse);
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<TokenResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+        TokenResponse tokenResponse = authService.refresh(request);
+        return ResponseEntity.ok(tokenResponse);
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Map<String, String>> logout(@RequestBody(required = false) RefreshTokenRequest request) {
+        if (request != null && request.getRefreshToken() != null) {
+            authService.logout(request.getRefreshToken());
+        }
+        return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
+    }
+
+    @PostMapping("/logout-all")
+    public ResponseEntity<Map<String, String>> logoutAll(Authentication authentication) {
+        if (authentication != null) {
+            authService.logoutAll(authentication.getName());
+        }
+        return ResponseEntity.ok(Map.of("message", "All sessions revoked successfully"));
+    }
+
     @GetMapping("/me")
     public Map<String, Object> me(Authentication authentication) {
         if (authentication == null) {
@@ -53,5 +90,13 @@ public class AuthController {
                 "username", authentication.getName(),
                 "roles", roles
         );
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }
