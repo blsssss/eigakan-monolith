@@ -32,7 +32,6 @@ $basicAdmin = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$adminU
 $basicUser  = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$userUser:$userPass"))
 ```
 
-> В примерах ниже там, где ранее были захардкоженные креды `admin:Admin@123`/`user:User@1234`, используйте свои `$basicAdmin`/`$basicUser`.
 
 ### Быстрый старт (PowerShell): сессия, токен и функции
 ```powershell
