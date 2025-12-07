@@ -10,6 +10,21 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cinemadb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,20 +44,34 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build with Gradle
-        run: ./gradlew build -x test
-        env:
-          SSL_KEYSTORE_PASSWORD: ${{ secrets.SSL_KEYSTORE_PASSWORD }}
+      - name: Compile
+        run: ./gradlew compileJava
 
-      - name: Run tests
+      - name: Test
         run: ./gradlew test
         env:
           SSL_KEYSTORE_PASSWORD: ${{ secrets.SSL_KEYSTORE_PASSWORD }}
+          DB_URL: ${{ vars.DB_URL }}
+          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          APP_ADMIN_USERNAME: ${{ vars.APP_ADMIN_USERNAME }}
+          APP_ADMIN_PASSWORD: Admin@123
+          APP_USER_USERNAME: ${{ vars.APP_USER_USERNAME }}
+          APP_USER_PASSWORD: User@1234
 
-      - name: Package application
+      - name: Package
         run: ./gradlew bootJar
         env:
           SSL_KEYSTORE_PASSWORD: ${{ secrets.SSL_KEYSTORE_PASSWORD }}
+          DB_URL: ${{ vars.DB_URL }}
+          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          APP_ADMIN_USERNAME: ${{ vars.APP_ADMIN_USERNAME }}
+          APP_ADMIN_PASSWORD: Admin@123
+          APP_USER_USERNAME: ${{ vars.APP_USER_USERNAME }}
+          APP_USER_PASSWORD: User@1234
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
