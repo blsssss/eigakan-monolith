@@ -1,4 +1,7 @@
-
+*.jks
+*.crt
+*.csr
+certs/
 
 # IDE
 .idea
