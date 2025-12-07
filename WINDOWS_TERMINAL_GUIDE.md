@@ -108,7 +108,7 @@ try {
 }
 
 # Login as admin
-$adminBody = '{"username":"admin","password":"Admin@1234"}'
+$adminBody = '{"username":"admin","password":"Admin@123"}'
 $adminTokens = Invoke-RestMethod -Uri "http://localhost:8081/api/auth/login" -Method Post -Body $adminBody -ContentType "application/json"
 $adminHeaders = @{ "Authorization" = "Bearer $($adminTokens.accessToken)" }
 
