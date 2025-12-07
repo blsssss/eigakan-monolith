@@ -51,26 +51,26 @@ jobs:
         run: ./gradlew test
         env:
           SSL_KEYSTORE_PASSWORD: ${{ secrets.SSL_KEYSTORE_PASSWORD }}
-          DB_URL: ${{ vars.DB_URL }}
-          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_URL: jdbc:postgresql://localhost:5432/cinemadb
+          DB_USERNAME: postgres
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          APP_ADMIN_USERNAME: ${{ vars.APP_ADMIN_USERNAME }}
+          APP_ADMIN_USERNAME: admin
           APP_ADMIN_PASSWORD: Admin@123
-          APP_USER_USERNAME: ${{ vars.APP_USER_USERNAME }}
+          APP_USER_USERNAME: user
           APP_USER_PASSWORD: User@1234
 
       - name: Package
         run: ./gradlew bootJar
         env:
           SSL_KEYSTORE_PASSWORD: ${{ secrets.SSL_KEYSTORE_PASSWORD }}
-          DB_URL: ${{ vars.DB_URL }}
-          DB_USERNAME: ${{ vars.DB_USERNAME }}
+          DB_URL: jdbc:postgresql://localhost:5432/cinemadb
+          DB_USERNAME: postgres
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          APP_ADMIN_USERNAME: ${{ vars.APP_ADMIN_USERNAME }}
+          APP_ADMIN_USERNAME: admin
           APP_ADMIN_PASSWORD: Admin@123
-          APP_USER_USERNAME: ${{ vars.APP_USER_USERNAME }}
+          APP_USER_USERNAME: user
           APP_USER_PASSWORD: User@1234
 
       - name: Upload artifact
