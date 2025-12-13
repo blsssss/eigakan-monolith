@@ -8,6 +8,10 @@ http://localhost:8081
 ```
 
 ## 🔐 Аутентификация и CSRF 
+```powershell
+$env:APP_ADMIN_USERNAME="admin"; $env:APP_ADMIN_PASSWORD="Admin@123"; $env:APP_USER_USERNAME="user"; $env:APP_USER_PASSWORD="User@1234"; .\task4.ps1
+```
+
 В проект подключена Spring Security с Basic Auth и включённой защитой CSRF. Это значит:
 - Для всех запросов требуется аутентификация (кроме `/api/auth/**`).
 - Для методов POST/PUT/DELETE дополнительно требуется CSRF-токен (в заголовке) и cookie `XSRF-TOKEN`.
