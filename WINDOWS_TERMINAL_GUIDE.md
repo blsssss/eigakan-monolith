@@ -12,6 +12,227 @@ http://localhost:8081
 $env:APP_ADMIN_USERNAME="admin"; $env:APP_ADMIN_PASSWORD="Admin@123"; $env:APP_USER_USERNAME="user"; $env:APP_USER_PASSWORD="User@1234"; .\task4.ps1
 ```
 
+
+## 🔐 Ручное тестирование CSRF
+
+### 📋 Подготовка
+
+```powershell
+# Задайте учётные данные
+$env:APP_ADMIN_USERNAME = "admin"
+$env:APP_ADMIN_PASSWORD = "Admin@123"
+
+$basicAdmin = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($env:APP_ADMIN_USERNAME):$($env:APP_ADMIN_PASSWORD)"))
+```
+
+---
+
+### ❌ ТЕСТ 1: POST без CSRF токена 
+
+Демонстрирует, что сервер **отклоняет** запросы на изменение данных без CSRF.
+
+```powershell
+# Попытка создать фильм БЕЗ CSRF токена
+try {
+    $body = '{"title":"Test Movie3","description":"Test","durationMinutes":120,"genre":"Action","director":"Director","year":2024}'
+    Invoke-WebRequest -Uri "http://localhost:8081/api/movies" -Method Post -Body $body -ContentType "application/json" -Headers @{
+        "Authorization" = "Basic $basicAdmin"
+    } -UseBasicParsing
+    Write-Host "НЕОЖИДАННО: Запрос прошёл (CSRF не работает!)" -ForegroundColor Red
+} catch {
+    $code = $_.Exception.Response.StatusCode.value__
+    Write-Host "Статус: $code" -ForegroundColor Yellow
+    if ($code -eq 403) {
+        Write-Host "ОЖИДАЕМО: 403 Forbidden - CSRF защита работает!" -ForegroundColor Green
+    }
+}
+```
+
+---
+
+### ✅ ТЕСТ 2: Получение CSRF токена
+
+```powershell
+# Создаём сессию и получаем токен
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$csrf = Invoke-RestMethod -Uri "http://localhost:8081/api/auth/csrf" -Method Get -WebSession $session
+
+Write-Host "Header Name: $($csrf.headerName)" -ForegroundColor Cyan
+Write-Host "Token: $($csrf.token)" -ForegroundColor Cyan
+Write-Host "Parameter Name: $($csrf.parameterName)" -ForegroundColor Cyan
+
+# Сохраняем для следующих тестов
+$csrfHeader = $csrf.headerName
+$csrfToken = $csrf.token
+```
+
+---
+
+### ✅ ТЕСТ 3: POST с CSRF токеном (ожидается 200/201)
+
+```powershell
+# Создание фильма С CSRF токеном
+$movieData = @{
+    title = "CSRF Test Movie $(Get-Date -Format 'HHmmss')"
+    description = "Created with CSRF protection"
+    durationMinutes = 120
+    genre = "Test"
+    director = "Test Director"
+    year = 2024
+} | ConvertTo-Json
+
+$headers = @{
+    "Authorization" = "Basic $basicAdmin"
+    $csrfHeader = $csrfToken
+    "Content-Type" = "application/json; charset=utf-8"
+}
+
+try {
+    $movie = Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Post -Body $movieData -Headers $headers -WebSession $session
+    Write-Host "УСПЕХ: Фильм создан!" -ForegroundColor Green
+    Write-Host "ID: $($movie.id)" -ForegroundColor Cyan
+    Write-Host "Title: $($movie.title)" -ForegroundColor Cyan
+    $testMovieId = $movie.id
+} catch {
+    Write-Host "ОШИБКА: $($_.Exception.Message)" -ForegroundColor Red
+}
+```
+
+---
+
+### ❌ ТЕСТ 4: PUT без CSRF (ожидается 403)
+
+```powershell
+# Попытка обновить фильм БЕЗ CSRF
+if ($testMovieId) {
+    try {
+        $updateData = '{"title":"Updated Title","description":"Updated","durationMinutes":130,"genre":"Drama","director":"New Director","year":2024}'
+        Invoke-WebRequest -Uri "http://localhost:8081/api/movies/$testMovieId" -Method Put -Body $updateData -ContentType "application/json" -Headers @{
+            "Authorization" = "Basic $basicAdmin"
+        } -UseBasicParsing
+        Write-Host "НЕОЖИДАННО: PUT без CSRF прошёл!" -ForegroundColor Red
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -eq 403) {
+            Write-Host "ОЖИДАЕМО: PUT без CSRF отклонён (403)" -ForegroundColor Green
+        }
+    }
+}
+```
+
+---
+
+### ✅ ТЕСТ 5: PUT с CSRF (ожидается 200)
+
+```powershell
+# Обновление фильма С CSRF
+if ($testMovieId) {
+    $updateData = @{
+        title = "Updated with CSRF"
+        description = "Successfully updated"
+        durationMinutes = 150
+        genre = "Updated Genre"
+        director = "Updated Director"
+        year = 2025
+    } | ConvertTo-Json
+
+    try {
+        $updated = Invoke-RestMethod -Uri "http://localhost:8081/api/movies/$testMovieId" -Method Put -Body $updateData -Headers $headers -WebSession $session
+        Write-Host "УСПЕХ: Фильм обновлён!" -ForegroundColor Green
+        Write-Host "New Title: $($updated.title)" -ForegroundColor Cyan
+    } catch {
+        Write-Host "ОШИБКА: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+```
+
+---
+
+### ❌ ТЕСТ 6: DELETE без CSRF (ожидается 403)
+
+```powershell
+# Попытка удалить БЕЗ CSRF
+if ($testMovieId) {
+    try {
+        Invoke-WebRequest -Uri "http://localhost:8081/api/movies/$testMovieId" -Method Delete -Headers @{
+            "Authorization" = "Basic $basicAdmin"
+        } -UseBasicParsing
+        Write-Host "НЕОЖИДАННО: DELETE без CSRF прошёл!" -ForegroundColor Red
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -eq 403) {
+            Write-Host "ОЖИДАЕМО: DELETE без CSRF отклонён (403)" -ForegroundColor Green
+        }
+    }
+}
+```
+
+---
+
+### ✅ ТЕСТ 7: DELETE с CSRF (ожидается 200/204)
+
+```powershell
+# Удаление С CSRF
+if ($testMovieId) {
+    try {
+        Invoke-RestMethod -Uri "http://localhost:8081/api/movies/$testMovieId" -Method Delete -Headers @{
+            "Authorization" = "Basic $basicAdmin"
+            $csrfHeader = $csrfToken
+        } -WebSession $session
+        Write-Host "УСПЕХ: Фильм удалён!" -ForegroundColor Green
+    } catch {
+        Write-Host "ОШИБКА: $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
+```
+
+---
+
+### ✅ ТЕСТ 8: GET без CSRF (ожидается 200)
+
+Демонстрирует, что CSRF **не требуется** для безопасных методов (GET, HEAD, OPTIONS).
+
+```powershell
+# GET запросы работают без CSRF (нужна только авторизация)
+try {
+    $movies = Invoke-RestMethod -Uri "http://localhost:8081/api/movies" -Method Get -Headers @{
+        "Authorization" = "Basic $basicAdmin"
+    }
+    Write-Host "УСПЕХ: GET работает без CSRF" -ForegroundColor Green
+    Write-Host "Количество фильмов: $($movies.Count)" -ForegroundColor Cyan
+} catch {
+    Write-Host "ОШИБКА: $($_.Exception.Message)" -ForegroundColor Red
+}
+```
+
+---
+
+### 🔄 ТЕСТ 9: Использование неверного CSRF токена (ожидается 403)
+
+```powershell
+# Подделанный токен
+$fakeToken = "fake-csrf-token-12345"
+
+try {
+    $body = '{"title":"Fake CSRF","description":"Test","durationMinutes":90,"genre":"Test","director":"Test","year":2024}'
+    Invoke-WebRequest -Uri "http://localhost:8081/api/movies" -Method Post -Body $body -ContentType "application/json" -Headers @{
+        "Authorization" = "Basic $basicAdmin"
+        $csrfHeader = $fakeToken
+    } -WebSession $session -UseBasicParsing
+    Write-Host "НЕОЖИДАННО: Поддельный токен принят!" -ForegroundColor Red
+} catch {
+    $code = $_.Exception.Response.StatusCode.value__
+    if ($code -eq 403) {
+        Write-Host "ОЖИДАЕМО: Поддельный CSRF токен отклонён (403)" -ForegroundColor Green
+    }
+}
+```
+
+---
+
+
+
+
 В проект подключена Spring Security с Basic Auth и включённой защитой CSRF. Это значит:
 - Для всех запросов требуется аутентификация (кроме `/api/auth/**`).
 - Для методов POST/PUT/DELETE дополнительно требуется CSRF-токен (в заголовке) и cookie `XSRF-TOKEN`.
